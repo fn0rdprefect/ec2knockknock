@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 
-namespace ec2knockknock {
+namespace ec2whitelist {
 
     public class AWSOptions 
     {
@@ -19,16 +19,20 @@ namespace ec2knockknock {
         public string ProfileName {get; set;}
         public string Region {get; set;}
     }
-
-   
     public class EC2CheckerService : IHostedService, IDisposable 
     {
+        private readonly string _awsConfigFilePath;
         private readonly ILogger _logger;
         private IOptions<AWSOptions> _appConfig;
         private Timer _timer;
                 private Amazon.EC2.AmazonEC2Client _awsClient;
         public EC2CheckerService(ILogger<EC2CheckerService> logger, IOptions<AWSOptions> appConfig)
         {
+            if(!System.IO.File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify), ".aws/credentials")))
+            {
+                _awsConfigFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify), ".aws/config");
+            }
+            
             _logger = logger;
             _appConfig = appConfig;
             
@@ -36,18 +40,17 @@ namespace ec2knockknock {
 
         public Task StartAsync(CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Starting");
-            _logger.LogInformation($"Loading AWS credentials from profile [{_appConfig.Value.ProfileName}], connecting to region [{_appConfig.Value.Region}]");
-            string _awsConfigFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify), ".aws/config");
+            
             var credChain = new Amazon.Runtime.CredentialManagement.CredentialProfileStoreChain(_awsConfigFilePath);
             AWSCredentials awsCredentials;
             if (credChain.TryGetAWSCredentials(_appConfig.Value.ProfileName, out awsCredentials))
             {
-                _logger.LogInformation($"Found AWS credentials for profile [{_appConfig.Value.ProfileName}] - Access Key [{awsCredentials.GetCredentials().AccessKey}]");
-                // use awsCredentials
                 var _regionEndpoint = Amazon.RegionEndpoint.GetBySystemName(_appConfig.Value.Region); 
-                if (_regionEndpoint?.DisplayName == "Unknown)") {_logger.LogWarning($"Region {_appConfig.Value.Region} does not exist. Defaulting to eu-west-1"); _regionEndpoint = Amazon.RegionEndpoint.EUWest1;}
-                _awsClient = new AmazonEC2Client(awsCredentials, Amazon.RegionEndpoint.GetBySystemName(_appConfig.Value.Region));
+                if (_regionEndpoint?.DisplayName == "Unknown)") 
+                {
+                    _logger.LogWarning($"Region {_appConfig.Value.Region} does not exist. Defaulting to eu-west-1"); _regionEndpoint = Amazon.RegionEndpoint.EUWest1;
+                }
+                _awsClient = new AmazonEC2Client(awsCredentials, _regionEndpoint);
             }
             _timer = new System.Threading.Timer(
                 DoWork,
@@ -58,9 +61,17 @@ namespace ec2knockknock {
             return Task.CompletedTask;
         }
 
-        public void DoWork(object state)
+        public async void DoWork(object state)
         {
-            _logger.LogInformation($"Background work - nothiing to do");
+            DescribeInstancesResponse InstanceList = await _awsClient.DescribeInstancesAsync();
+            foreach (Reservation _reservation in InstanceList.Reservations)
+            {
+                _logger.LogInformation($"Reservation ID {_reservation.ReservationId} has the following instances:");
+                foreach (Instance _instance in _reservation.Instances)
+                {
+                    _logger.LogInformation($"Instance ID {_instance.InstanceId} has IP Address {_instance.PublicIpAddress}");
+                }
+            }
         }
 
         public Task StopAsync(CancellationToken cancellationToken)

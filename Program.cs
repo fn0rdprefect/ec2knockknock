@@ -5,7 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace ec2knockknock
+namespace ec2whitelist
 {
     class Program
     {
@@ -29,6 +29,7 @@ namespace ec2knockknock
                 services.AddOptions();
                 
                 services.Configure<AWSOptions>(hostContext.Configuration.GetSection("AWSOptions"));
+                
                 services.AddSingleton<IHostedService, EC2CheckerService>();
             })
             .ConfigureLogging((hostingContext, logging) => 
